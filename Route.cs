@@ -3,35 +3,26 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Web;
+using System.Text.RegularExpressions;
 
 namespace SimpleActionHandler
 {
     public class Route
     {
-        string method;
-        string path;
-        Func<HttpRequest, ActionResult> action;
 
-        public string Path
-        {
-            get
-            {
-                return path;
-            }
-        }
+        private Func<HttpRequest, ActionResult> action;
 
-        public string Method
-        {
-            get
-            {
-                return method;
-            }
-        }
+        public string Path { get; private set; }
+        public Regex Pattern { get; private set; }
+        public string Method { get; private set; }
+        public string Name { get; private set; }
 
-        public Route(string method, string path, Func<HttpRequest, ActionResult> action)
+        public Route(string method, string name, string path, Func<HttpRequest, ActionResult> action)
         {
-            this.method = method;
-            this.path = path;
+            this.Method = method;
+            this.Path = path;
+            this.Pattern = new Regex("^" + path + "$");
+            this.Name = name;
             this.action = action;
         }
 

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Web;
 using System.IO;
+using System.Text.RegularExpressions;
 
 namespace SimpleActionHandler
 {
@@ -12,28 +13,38 @@ namespace SimpleActionHandler
         private List<Route> routes;
         private HttpContext context;
 
-        private static string Layout { get; set; }
-        private static IViewEngine RenderEngine { get; set; }
+        public string Layout { get; set; }
+        public Dictionary<string, object> Params { get; private set; }
+        public Dictionary<string, object> NamedRoutes { get; private set; }
 
-        public static void setTemplatePath(string path)
+        public List<Route> Routes
         {
-            RenderEngine.SetTemplatePath(HttpContext.Current.Server.MapPath("~/") + path);
-        }
-
-        static ModuleHandler()
-        {
-            Layout = "Application";
-            RenderEngine = new DotLiquidViewEngine { Layout = Layout };
+            get { return routes; }
         }
 
         public ModuleHandler()
         {
             routes = new List<Route>();
+            Layout = "Application.html";
+            Params = new Dictionary<string, object>();
         }
 
-        public void Get(string path, Func<HttpRequest, ActionResult> action)
+        private void BuildNamedRoutes()
         {
-            routes.Add(new Route("GET", path, action));
+            var request = HttpContext.Current.Request;
+            var appPath = request.ApplicationPath;
+            var handlerName = request.Url.Segments[2];
+            NamedRoutes = Routes.ToDictionary(k => k.Name, v => ( appPath + "/" + handlerName + v.Path) as object);
+        }
+
+        public virtual void Initialize()
+        {
+            BuildNamedRoutes();
+        }
+
+        public void Get(string name, string path, Func<HttpRequest, ActionResult> action)
+        {
+            routes.Add(new Route("GET", name, path, action));
         }
 
         public bool IsReusable
@@ -45,17 +56,42 @@ namespace SimpleActionHandler
 
         public void ProcessRequest(HttpContext context)
         {
-            //var requiredResourceSegments = context.Request.Url.Segments;
             this.context = context;
-            var requestedPath = String.Join("", context.Request.Url.Segments.Skip(3).ToArray());
-            var possibleActions = routes.ToLookup(r => r.Path, v => v)[requestedPath];
-            var choosedAction = possibleActions.ToDictionary(a => a.Method, v => v)[context.Request.HttpMethod];
-            var actionResult = choosedAction.InvokeAction(context.Request);
+            var request = context.Request;
+            var path = String.Join("", request.Url.Segments.Skip(3).ToArray());
+
+            var route = GetRoute(request.HttpMethod, path);
+            ExtractQueryString(request);
+            ExtractNamedRoutesParams(route.Pattern, path);
+            
+            var actionResult = route.InvokeAction(context.Request);
             buildResponseFrom(actionResult);
+
             //context.Response.ContentType = "application/json";
             //var jsonText = JsonConvert.SerializeObject(result, Newtonsoft.Json.Formatting.Indented);
             //response.ContentType = "text/html";
             //context.Response.Write(jsonText);
+        }
+
+        private Route GetRoute(string method, string path)
+        {
+            return routes.First(t => t.Method == context.Request.HttpMethod && t.Pattern.Match(path).Success);
+        }
+
+        private void ExtractQueryString(HttpRequest request)
+        {
+            var coll = request.QueryString;
+            var keys = coll.AllKeys;
+            foreach (var key in keys)
+                Params[key] = coll[key];
+        }
+
+        private void ExtractNamedRoutesParams(Regex rgx, string path)
+        {
+            var groups = rgx.GetGroupNames().Skip(1);
+            var match = rgx.Match(path);
+            foreach (string name in groups)
+                Params[name] = match.Groups[name].Value;
         }
 
         private void buildResponseFrom(ActionResult actionResult) 
@@ -64,23 +100,6 @@ namespace SimpleActionHandler
             response.ContentType = actionResult.ContentType;
             response.ContentEncoding = System.Text.Encoding.UTF8;
             response.Write(actionResult.ResponseText);
-        }
-
-        public void setRenderEngine(IViewEngine engine)
-        {
-            RenderEngine = engine;
-            engine.Layout = Layout;
-        }
-        
-        public void setLayout(string layout)
-        {
-            Layout = layout;
-            RenderEngine.Layout = Layout;
-        }
-
-        public string Render<T>(string template, T parameters)
-        {
-            return RenderEngine.Render<T>(template, parameters);
         }
 
         public ActionResult Ok(string responseText)
