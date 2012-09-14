@@ -4,24 +4,38 @@ using System.Linq;
 using System.Text;
 using System.Web;
 using System.Text.RegularExpressions;
+using SimpleActionHandler.Helpers;
 
 namespace SimpleActionHandler.View
 {
     public interface IRenderable
     {
+        string RenderContent(string contentName);
         string TransformText();
         string Render<T>(object parameters);
         void Initialize();
     }
 
-    public partial class Layout : IRenderable
+    public partial class Layout : IRenderable, IUrlHelpersMixin
     {
-        public IRenderable Content { get; set; }
+        private IRenderable templateContent;
+
+        public UrlHelpers UrlHelpers { get; private set; }
+
+        public Layout()
+        {
+            UrlHelpers = new UrlHelpers();
+        }
 
         public virtual void Initialize()
         {
         }
-        
+
+        public void SetTemplate(Template templateContent)
+        {
+            this.templateContent = templateContent;
+        }
+
         public virtual string Render<T>(object parameters)
         {
             return this.TransformText();
@@ -29,30 +43,55 @@ namespace SimpleActionHandler.View
 
         public string YieldContent()
         {
-            return Content.TransformText();
+            return templateContent.RenderContent("main");
+        }
+
+        public string YieldContentFor(string content)
+        {
+            return templateContent.RenderContent(content);
         }
 
         protected string Asset(string path)
         {
-            return HttpContext.Current.Request.ApplicationPath + path;
+            return VirtualPathUtility.ToAbsolute("~/" + path, HttpContext.Current.Request.ApplicationPath);
+        }
+
+        public string RenderContent(string contentName) {
+            return templateContent.RenderContent(contentName);
         }
 
     }
 
-    public partial class Template : IRenderable
+    public partial class Template : IRenderable, IUrlHelpersMixin
     {
+
+        public UrlHelpers UrlHelpers { get; private set; }
 
         public virtual void Initialize()
         {
         }
 
-        public string Render<T>(object parameters)
+        private Dictionary<string, string> contents
+            = new Dictionary<string, string>();
+        
+        public Template()
+        {
+            UrlHelpers = new UrlHelpers();
+        }
+
+        public virtual string Render<T>(object parameters)
         {
             this.Session = FromAnonymousObject(parameters);
             this.Initialize();
             var layout = System.Activator.CreateInstance<T>() as Layout;
-            layout.Content = this;
+            layout.SetTemplate(this);
+            this.Render();
             return layout.TransformText();
+        }
+
+        private void Render()
+        {
+            contents.Add("main", this.TransformText());
         }
 
         private Dictionary<string, object> FromAnonymousObject<T>(T obj)
@@ -64,6 +103,29 @@ namespace SimpleActionHandler.View
             return d;
         }
 
+        protected void ContentFor(string contentName, Action contentBody)
+        {
+            var bkpGenEnv = this.GenerationEnvironment;
+            var currentGenEnv = new StringBuilder();
+            this.GenerationEnvironment = currentGenEnv;
+            contentBody.Invoke();
+            var x = currentGenEnv.ToString();
+            contents.Add(contentName, x);
+            this.GenerationEnvironment = bkpGenEnv;
+        }
+
+        public string RenderContent(string contentName)
+        {
+            try
+            {
+                return contents[contentName];
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
         protected T CastTo<T>(object value, T type)
         {
             return (T)value;
@@ -71,18 +133,30 @@ namespace SimpleActionHandler.View
 
         //TODO: Colocar em um mixin de helpers
 
-        protected string UrlFor(string routeName, params object[] args)
-        {
-            var handler = (ModuleHandler)HttpContext.Current.Handler;
-            var str = (string)handler.NamedRoutes[routeName];
-            var pattern = @"\(.*?\)";
-            var matches = Regex.Matches(str, pattern);
-            var fmtStr = str;
-            for (var i = 0; i < matches.Count; i++)
-                fmtStr = fmtStr.Replace(matches[i].Value, String.Format("{{0}}", i));
+        //protected string UrlFor(string routeName, object args)
+        //{
+        //    return urlHelpers.UrlFor(routeName, args);
+        //}
 
-            return String.Format(fmtStr, args);
-        }
+        //protected string UrlFor(string routeName)
+        //{
+        //    return urlHelpers.UrlFor(routeName);
+        //}
+
+        //protected string RootPath()
+        //{
+        //    return urlHelpers.RootPath();
+        //}
+
+        //protected string Path(string path)
+        //{
+        //    return urlHelpers.RootPath();
+        //}
+
+        //protected string QueryString()
+        //{
+        //    return urlHelpers.QueryString();
+        //}
 
         protected string NumberDecimalFormat(decimal input, string culture, string format)
         {

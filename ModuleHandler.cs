@@ -33,8 +33,13 @@ namespace SimpleActionHandler
         {
             var request = HttpContext.Current.Request;
             var appPath = request.ApplicationPath;
-            var handlerName = request.Url.Segments[2];
-            NamedRoutes = Routes.ToDictionary(k => k.Name, v => ( appPath + "/" + handlerName + v.Path) as object);
+            var handlerName = request.AppRelativeCurrentExecutionFilePath
+                                     .Split('/').Skip(1).First();
+
+            var basePath = VirtualPathUtility.AppendTrailingSlash(
+                    VirtualPathUtility.ToAbsolute("~/" + handlerName, appPath));
+
+            NamedRoutes = Routes.ToDictionary(k => k.Name, v => (basePath + v.Path) as object);
         }
 
         public virtual void Initialize()
@@ -58,9 +63,13 @@ namespace SimpleActionHandler
         {
             this.context = context;
             var request = context.Request;
-            var path = String.Join("", request.Url.Segments.Skip(3).ToArray());
+
+            var path = ExtractPath(request);
 
             var route = GetRoute(request.HttpMethod, path);
+
+            //context.Response.Write(route.Path);
+
             ExtractQueryString(request);
             ExtractNamedRoutesParams(route.Pattern, path);
             
@@ -71,6 +80,20 @@ namespace SimpleActionHandler
             //var jsonText = JsonConvert.SerializeObject(result, Newtonsoft.Json.Formatting.Indented);
             //response.ContentType = "text/html";
             //context.Response.Write(jsonText);
+        }
+
+        private string ExtractPath(HttpRequest request)
+        {
+            var currentUri = request.Url;
+            var abs = request.ApplicationPath;
+            var rel = request.AppRelativeCurrentExecutionFilePath;
+
+            var uriBuilder = new UriBuilder(currentUri.Scheme, currentUri.Host);
+            var uri = new Uri(uriBuilder.Uri, VirtualPathUtility.ToAbsolute(rel, "/"));
+
+            var path = String.Join("", uri.Segments.Skip(2).ToArray());
+
+            return path;
         }
 
         private Route GetRoute(string method, string path)
@@ -98,14 +121,28 @@ namespace SimpleActionHandler
         {
             var response = context.Response;
             response.ContentType = actionResult.ContentType;
+            response.StatusCode = actionResult.StatusCode;
             response.ContentEncoding = System.Text.Encoding.UTF8;
             response.Write(actionResult.ResponseText);
         }
 
         public ActionResult Ok(string responseText)
         {
-            return new ActionResult { ResponseText = responseText, ContentType = "text/html" };
+            return new ActionResult { 
+                ResponseText = responseText, 
+                ContentType = "text/html",
+                StatusCode = 200
+            };
         }
 
+        public ActionResult UnAuthorized(string responseText)
+        {
+            return new ActionResult
+            {
+                ResponseText = responseText,
+                ContentType = "text/html",
+                StatusCode = 401
+            };
+        }
     }
 }
