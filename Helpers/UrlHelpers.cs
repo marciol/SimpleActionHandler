@@ -39,6 +39,16 @@ namespace SimpleActionHandler.Helpers
         {
             return client.UrlHelpers.QueryString();
         }
+
+        public static string AddQueryString(this IUrlHelpersMixin client, string key, string value)
+        {
+            return client.UrlHelpers.AddQueryString(key, value);
+        }
+
+        public static string RemoveQueryString(this IUrlHelpersMixin cliente, string key)
+        {
+            return cliente.UrlHelpers.RemoveQueryString(key);
+        }
     }
 
     public class UrlHelpers
@@ -49,9 +59,11 @@ namespace SimpleActionHandler.Helpers
         public UrlHelpers()
         {
             var contextWrapper = new HttpContextWrapper(HttpContext.Current);
-            requestContext =
-                new RequestContext(contextWrapper, 
-                    RouteTable.Routes.GetRouteData(contextWrapper));
+            var routeData = RouteTable.Routes.GetRouteData(contextWrapper);
+
+            if (routeData != null)
+                requestContext =
+                    new RequestContext(contextWrapper, routeData);
 
             routeCollection = RouteTable.Routes;
         }
@@ -85,6 +97,37 @@ namespace SimpleActionHandler.Helpers
         public string QueryString()
         {
             return requestContext.HttpContext.Request.Url.Query;
+        }
+
+        public string AddQueryString(string key, string value)
+        {
+            var request = requestContext.HttpContext.Request;
+            var col = request.QueryString.ToPairs();
+
+            var updatedCol = col.Where(kv => kv.Key != key).ToList();
+            updatedCol.Add(new KeyValuePair<string,string>(key, value));
+            var str =
+                "?" +
+                String.Join(
+                    "&", updatedCol.Select(kv => String.Format("{0}={1}", kv.Key, kv.Value))
+                                   .ToArray());
+
+            return str;
+        }
+
+        public string RemoveQueryString(string key)
+        {
+            var request = requestContext.HttpContext.Request;
+            var col = request.QueryString.ToPairs();
+
+            var updatedCol = col.Where(kv => kv.Key != key).ToList();
+            var str =
+                "?" +
+                String.Join(
+                    "&", updatedCol.Select(kv => String.Format("{0}={1}", kv.Key, kv.Value))
+                                   .ToArray());
+
+            return str;
         }
 
     }

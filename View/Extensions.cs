@@ -78,7 +78,7 @@ namespace SimpleActionHandler.View
         {
             UrlHelpers = new UrlHelpers();
         }
-
+        
         public virtual string Render<T>(object parameters)
         {
             this.Session = FromAnonymousObject(parameters);
@@ -87,6 +87,13 @@ namespace SimpleActionHandler.View
             layout.SetTemplate(this);
             this.Render();
             return layout.TransformText();
+        }
+
+        public virtual string Render(object parameters)
+        {
+            this.Session = FromAnonymousObject(parameters);
+            this.Initialize();
+            return this.TransformText();
         }
 
         private void Render()
@@ -166,7 +173,13 @@ namespace SimpleActionHandler.View
 
         protected bool IsNegative(decimal number)
         {
-            return (int)number < 0.0m;
+            return number < 0.0m;
+        }
+
+        protected string JsonData(object obj)
+        {
+            var json = Newtonsoft.Json.JsonConvert.SerializeObject(obj);
+            return System.Web.HttpUtility.HtmlEncode(json);
         }
 
     }

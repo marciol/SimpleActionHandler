@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.IO;
 using System.Web;
 
@@ -9,14 +10,14 @@ namespace SimpleActionHandler
 {
     public class HandlerController : IController
     {
-        public Dictionary<string, object> Params { get; set; }
+        public Params<string, object> Params { get; set; }
 
         public HttpRequest Request { get; set; }
         public HttpResponse Response { get; set; }
 
         public HandlerController()
         {
-            Params = new Dictionary<string, object>();
+            Params = new Params<string, object>();
         }
 
         public ActionResult Ok(string responseText)
@@ -47,12 +48,54 @@ namespace SimpleActionHandler
             return new ActionResult
             {
                 StatusCode = 302,
-                Headers = new Dictionary<string, string>
+                Headers = new List<KeyValuePair<string, string>>
                 {
-                    { "Location", path }
+                    new KeyValuePair<string, string>("Location", path)
                 }
             };
         }
-  
+
+        public class ResponseSelector
+        {
+            private Dictionary<string, Func<string>> responseTypes = new Dictionary<string, Func<string>>(); 
+
+            public void Js(Func<string> result)
+            {
+                responseTypes["Js"] = result;
+            }
+
+            public void JSON(Func<string> result)
+            {
+                responseTypes["JSON"] = result;
+            }
+
+            public void Html(Func<string> result)
+            {
+                responseTypes["Html"] = result;
+            }
+
+            public string Execute(string responseType)
+            {
+                return responseTypes[responseType].Invoke();
+            }
+        }
+
+        public string RespondTo(Action<ResponseSelector> selector)
+        {
+            var responseSelector = new ResponseSelector(); 
+            selector.Invoke(responseSelector);
+            if (Regex.IsMatch(Request.Headers["Accept"], ".*json.*"))
+            {
+                return responseSelector.Execute("JSON");
+            }
+            else if (Regex.IsMatch(Request.Headers["Accept"], ".*javascript.*"))
+            {
+                return responseSelector.Execute("Js");
+            }
+            else
+            {
+                return responseSelector.Execute("Html");
+            }
+        }
     }
 }

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.ComponentModel;
+using System.Reflection;
 
 namespace SimpleActionHandler
 {
@@ -29,6 +31,18 @@ namespace SimpleActionHandler
             return (T)value;
         }
 
+        public static T Convert<T>(this string self)
+        {
+            if (self == string.Empty)
+                return default(T);
+
+            var converter = TypeDescriptor.GetConverter(typeof(T));
+            if (converter == null)
+                return default(T);
+            else
+                return (T)converter.ConvertFromString(self);
+        }
+
         public static T GetOrElse<T>(this T getValue, T orElseValue)
         {
             return getValue == null ? orElseValue : getValue;
@@ -43,5 +57,24 @@ namespace SimpleActionHandler
         {
             return getValue == null ? elseFunc.Invoke() : (T)getValue;
         }
+
+        public static IEnumerable<KeyValuePair<string, string>> ToPairs(this System.Collections.Specialized.NameValueCollection collection)
+        {
+            if (collection == null)
+            {
+                throw new ArgumentNullException("collection");
+            }
+
+            return collection.Cast<string>().Select(key => new KeyValuePair<string, string>(key, collection[key]));
+        }
+
+        public static void Rethrow(this Exception ex)
+        {
+            typeof(Exception).GetMethod("PrepForRemoting",
+                BindingFlags.NonPublic | BindingFlags.Instance)
+                .Invoke(ex, new object[0]);
+            throw ex;
+        }
+
     }
 }

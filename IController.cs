@@ -8,7 +8,7 @@ namespace SimpleActionHandler
 {
     public interface IController
     {
-        Dictionary<string, object> Params { get; set; }
+        Params<string, object> Params { get; set; }
         HttpRequest Request { get; set; }
         HttpResponse Response { get; set; }
     }

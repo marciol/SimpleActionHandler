@@ -5,10 +5,12 @@ using System.Reflection;
 using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
+using System.Web.SessionState;
+using System.Text.RegularExpressions;
 
 namespace SimpleActionHandler
 {
-    public class DefaultHandler : IHttpHandler
+    public class DefaultHandler : IHttpHandler, IRequiresSessionState
     {
         public bool IsReusable
         {
@@ -27,7 +29,7 @@ namespace SimpleActionHandler
                                  .SelectMany(t => t.GetTypes())
                                  .Where(t => t.IsSubclassOf(typeof(HandlerController)));
 
-            var type = controllerTypes.First(t => t.Name == controllerName); 
+            var type = controllerTypes.First(t => t.FullName.Contains(controllerName)); 
             var controller = System.Activator.CreateInstance(type) as IController;
 
             controller.Request = context.Request;
@@ -36,16 +38,33 @@ namespace SimpleActionHandler
             foreach (var segment in routeData.Values)
                 controller.Params.Add(segment.Key, segment.Value);
 
-            foreach (var pkey in context.Request.QueryString.AllKeys)
-                controller.Params.Add(pkey, context.Request.QueryString[pkey]);
+            foreach (var key in context.Request.QueryString.AllKeys)
+                controller.Params.Add(key, context.Request.QueryString[key]);
 
+            foreach (var key in context.Request.Form.AllKeys)
+                controller.Params.Add(key, controller.Request.Form[key]);
+            
             var candidates =
                 type.GetMethods()
                     .Where(method => method.Name == actionName);
 
             var action =
-                candidates.FirstOrDefault(method => method.GetParameters().Any(parameter => controller.Params.Keys.Contains(parameter.Name)))
-                          .GetOrElse(candidates.FirstOrDefault(method => method.GetParameters().Count() == 0));
+                candidates.FirstOrDefault(
+                    method => 
+                        method.GetParameters().Any(
+                        parameter => 
+                            controller.Params.Keys.Contains(parameter.Name)));
+
+            action = action.GetOrElse(candidates.FirstOrDefault(method => method.GetParameters().Count() == 0));
+
+            var filters =
+                type.GetMethods()
+                    .Where(
+                        methods => 
+                            methods.GetCustomAttributes(typeof(BeforeAttribute), true)
+                                   .Cast<BeforeAttribute>()
+                                   .Any(attr => attr.IsIncluded(action) && !attr.IsExcepted(action)))
+                                   .ToList();
                     
             var parameters = new List<object>();
             
@@ -84,6 +103,11 @@ namespace SimpleActionHandler
 
                     parameterValue = values;
                 }
+                else if (parameterType.Name == "Int32")
+                {
+                    var strValue = (string)value;
+                    parameterValue = int.Parse(strValue);
+                }
                 else
                 {
                     parameterValue = value;
@@ -92,7 +116,37 @@ namespace SimpleActionHandler
                 parameters.Add(parameterValue);
             }
 
-            var actionResult = action.Invoke(controller, parameters.ToArray()) as ActionResult;
+            var actionResult = new ActionResult();
+
+            try
+            {
+                filters.ForEach(
+                    filter =>
+                        filter.Invoke(controller, new object[] { }));
+
+                actionResult = action.Invoke(controller, parameters.ToArray()) as ActionResult;
+            }
+            catch (TargetInvocationException e)
+            {
+                if (e.InnerException is NotAuthorizated)
+                {
+                    actionResult =
+                        new ActionResult
+                        {
+                            StatusCode = 302,
+                            Headers = new List<KeyValuePair<string, string>>
+                            {
+                                new KeyValuePair<string, string>("Location", ((NotAuthorizated)e.InnerException).Path)
+                            }
+                        };
+                }
+                else
+                {
+                    throw e;
+                }
+
+            }
+
             buildResponseFrom(actionResult, controller.Response);
         }
 
@@ -101,5 +155,81 @@ namespace SimpleActionHandler
             actionResult.ExecuteResult(response);
         }
 
+    }
+
+    [AttributeUsage(AttributeTargets.Method)]
+    public class BeforeAttribute : System.Attribute
+    {
+        string[] includedNames = new string[] { }, 
+                 exceptedNames = new string[] { };
+
+        Regex extractParameters = new Regex(@"\(([\w,]*)\)");
+
+        public string Include {
+            get
+            {
+                return string.Join(";", includedNames);
+            }
+
+            set
+            {
+                includedNames = Split(value);
+            }
+        }
+
+        public string Except { 
+            get
+            {
+                return string.Join(";", exceptedNames);
+            }
+
+            set
+            {
+                exceptedNames = Split(value);
+            }
+        }
+
+        string[] Split(string coll)
+        {
+            return coll.Split(';').Select(s => s.Trim()).ToArray();
+        }
+
+        public bool IsIncluded(MethodInfo method)
+        {
+            if (Include == "*") return true;
+
+            return Verify(method, methodName => includedNames.Contains(methodName));
+        }
+
+        public bool IsExcepted(MethodInfo method)
+        {
+            if (Except == "*") return true;
+
+            return Verify(method, methodName => exceptedNames.Contains(methodName));
+        }
+
+        private bool Verify(MethodInfo method, Func<string, bool> predicate)
+        {
+            var parameters = 
+                string.Join(
+                    ",",
+                    method.GetParameters().Select(t => t.ParameterType.ToString()).ToArray());
+
+            var methodName = string.Format("{0}({1})", method.Name, parameters);
+
+            var result = predicate.Invoke(methodName);
+
+            return result;
+        }
+    }
+
+    public class NotAuthorizated : Exception
+    {
+        public string Path { get; set; }
+
+        public NotAuthorizated(string path)
+        {
+            this.Path = path;
+        }
     }
 }
